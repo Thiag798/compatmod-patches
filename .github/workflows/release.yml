@@ -1,0 +1,135 @@
+name: Publicar Release de Patches
+
+# Dispara quando você faz push de uma tag no formato "1.21.1-v2024.06.01"
+on:
+  push:
+    tags:
+      - '1.21.1-v*'
+      - '1.20.4-v*'
+      - '1.20.1-v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # necessário para criar releases
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Detecta versão do MC a partir da tag ────────────────────────────
+      # Tag: "1.21.1-v2024.06.01"  →  MC_VERSION="1.21.1"
+      - name: Extrair versão do Minecraft
+        id: mc_version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          MC_VERSION="${TAG%%-*}"
+          echo "mc_version=${MC_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "asset_name=patches-${MC_VERSION}.zip" >> "$GITHUB_OUTPUT"
+          echo "MC_VERSION=${MC_VERSION} | TAG=${TAG}"
+
+      # ── 3. Ler manifest.json ────────────────────────────────────────────────
+      - name: Ler manifest.json
+        id: manifest
+        run: |
+          MANIFEST_PATH="patches/manifest.json"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "ERRO: manifest.json não encontrado!"
+            exit 1
+          fi
+          VERSION=$(jq -r .version "$MANIFEST_PATH")
+          MC_VERSION_MANIFEST=$(jq -r .minecraft_version "$MANIFEST_PATH")
+          PATCH_COUNT_MANIFEST=$(jq -r .patch_count "$MANIFEST_PATH")
+          RELEASE_DATE=$(jq -r .release_date "$MANIFEST_PATH")
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "mc_version_manifest=${MC_VERSION_MANIFEST}" >> "$GITHUB_OUTPUT"
+          echo "patch_count_manifest=${PATCH_COUNT_MANIFEST}" >> "$GITHUB_OUTPUT"
+          echo "release_date=${RELEASE_DATE}" >> "$GITHUB_OUTPUT"
+          echo "Manifest lido: Versão ${VERSION}, MC ${MC_VERSION_MANIFEST}, ${PATCH_COUNT_MANIFEST} patches."
+
+      # ── 4. Valida CHECKSUMS.sig existe (não está vazio/placeholder) ─────────
+      - name: Verificar assinatura
+        run: |
+          SIG="patches/CHECKSUMS.sig"
+          if [ ! -f "$SIG" ]; then
+            echo "ERRO: CHECKSUMS.sig não encontrado!"
+            exit 1
+          fi
+          SIZE=$(wc -c < "$SIG")
+          if [ "$SIZE" -lt 64 ]; then
+            echo "ERRO: CHECKSUMS.sig parece ser um placeholder (${SIZE} bytes). Assine antes de publicar."
+            exit 1
+          fi
+          echo "CHECKSUMS.sig OK (${SIZE} bytes)"
+
+      # ── 5. Gera o bundle ZIP com estrutura patches/ ────────────────────────
+      - name: Criar bundle ZIP
+        run: |
+          ASSET="${{ steps.mc_version.outputs.asset_name }}"
+          zip -r "${ASSET}" patches/ -x "*.DS_Store" -x "*/.gitkeep"
+          SIZE=$(du -sh "${ASSET}" | cut -f1)
+          echo "Bundle criado: ${ASSET} (${SIZE})"
+          # Verifica que o ZIP contém CHECKSUMS
+          unzip -l "${ASSET}" | grep CHECKSUMS
+
+      # ── 6. Gera notas de release automáticas ──────────────────────────────
+      - name: Gerar notas de release
+        id: release_notes
+        run: |
+          TAG="${{ steps.mc_version.outputs.tag }}"
+          MC="${{ steps.manifest.outputs.mc_version_manifest }}"
+          COUNT="${{ steps.manifest.outputs.patch_count_manifest }}"
+          RELEASE_DATE="${{ steps.manifest.outputs.release_date }}"
+          
+          cat > release_notes.md << EOF
+          ## CompatMod Patches — ${TAG}
+          
+          **Minecraft:** ${MC}  
+          **Total de patches:** ${COUNT}  
+          **Data:** ${RELEASE_DATE}
+          
+          ### Mods cobertos
+          $(for dir in patches/*/; do
+              mod=$(basename "$dir")
+              n=$(find "$dir" -name "*.class" | wc -l)
+              [ "$n" -gt 0 ] && echo "- **${mod}**: ${n} patches"
+          done)
+          
+          ### Como usar
+          O CompatMod baixa estes patches automaticamente. Nenhuma ação necessária.
+          
+          ### Instalação manual
+          ### Proteção contra Downgrade
+          O cliente deve armazenar a versão mais recente aceita e rejeitar versões anteriores para evitar ataques de downgrade.
+
+          ### Instalação manual
+          Extraia \`${ASSET_NAME}\` em \`.minecraft/compatmod/patch-cache/release/${TAG}/\`
+          EOF
+          
+          echo "release_notes_file=release_notes.md" >> "$GITHUB_OUTPUT"
+
+      # ── 7. Cria a GitHub Release e faz upload do ZIP ──────────────────────
+      - name: Criar GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.mc_version.outputs.tag }}
+          name: "Patches ${{ steps.mc_version.outputs.tag }} (${{ steps.count.outputs.patch_count }} patches)"
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: ${{ steps.mc_version.outputs.asset_name }}
+          fail_on_unmatched_files: true
+
+      # ── 8. Atualiza branch releases/<mc_version> ──────────────────────────
+      # Isso garante que raw.githubusercontent.com/…/releases/1.21.1/… aponte
+      # para os patches mais recentes desta versão do MC
+      - name: Atualizar branch releases/${{ steps.mc_version.outputs.mc_version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git push origin HEAD:refs/heads/releases/${{ steps.mc_version.outputs.mc_version }}
+          echo "Branch releases/${{ steps.mc_version.outputs.mc_version }} atualizada."

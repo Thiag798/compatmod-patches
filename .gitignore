@@ -1,0 +1,15 @@
+# Chave privada Ed25519 — NUNCA commitar
+ed25519.pem
+*.pem.bak
+
+# Bundles gerados localmente
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
