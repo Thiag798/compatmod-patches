@@ -10,8 +10,11 @@ Após executar, assine o resultado com sua chave Ed25519:
       -out patches/CHECKSUMS.sig \\
       -in patches/CHECKSUMS.properties
 
+NOVA ESTRUTURA (v7.8.0):
+    patches/<modpack-slug-ou-standalone>/<modid>/<caminho-original>.class
+
 Formato de saída (CHECKSUMS.properties):
-    ic2:b47f7c4891229296 = b47f7c4891229296abcd...  (sha256 completo, 64 hex chars)
+    modpack:modid:hash16 = sha256_completo
 """
 
 import hashlib
@@ -56,42 +59,44 @@ def main():
         total += 1
         print(f"  manifest.json: {manifest_checksum[:16]} (incluído)")
 
-
-    # Percorre todos os subdiretórios de mod
-    for mod_dir in sorted(PATCHES_DIR.iterdir()):
-        if mod_dir.name == "manifest.json":
-            continue # Já processado
-
-        if not mod_dir.is_dir():
+    # Percorre todos os subdiretórios (modpacks)
+    for modpack_dir in sorted(PATCHES_DIR.iterdir()):
+        if modpack_dir.name in ["manifest.json", "CHECKSUMS.properties", "CHECKSUMS.sig"]:
             continue
-        mod_id = mod_dir.name
-        count = 0
 
-        for class_file in sorted(mod_dir.glob("*.class")):
-            # Valida magic bytes antes de incluir
-            if not validate_class_magic(class_file):
-                errors.append(f"  AVISO: {class_file.name} não tem magic CA FE BA BE — ignorado")
+        if not modpack_dir.is_dir():
+            continue
+            
+        modpack_slug = modpack_dir.name
+        print(f"\n📦 Modpack: {modpack_slug}")
+
+        # Percorre subdiretórios de mod dentro do modpack
+        for mod_dir in sorted(modpack_dir.iterdir()):
+            if not mod_dir.is_dir():
                 continue
+            
+            mod_id = mod_dir.name
+            count = 0
 
-            # Nome do arquivo deve ser exatamente os 16 primeiros hex do SHA-256
-            checksum = sha256(class_file)
-            expected_stem = checksum[:16]
-            if class_file.stem != expected_stem:
-                errors.append(
-                    f"  AVISO: {mod_id}/{class_file.name} — "
-                    f"nome diverge do hash ({expected_stem}). Renomeando..."
-                )
-                correct_path = class_file.parent / (expected_stem + ".class")
-                class_file.rename(correct_path)
-                class_file = correct_path
+            # Busca recursivamente por arquivos .class (mantendo estrutura original)
+            for class_file in sorted(mod_dir.rglob("*.class")):
+                # Valida magic bytes antes de incluir
+                if not validate_class_magic(class_file):
+                    errors.append(f"  AVISO: {class_file.relative_to(PATCHES_DIR)} não tem magic CA FE BA BE — ignorado")
+                    continue
 
-            key = f"{mod_id}:{checksum[:16]}"
-            entries[key] = checksum
-            count += 1
-            total += 1
+                checksum = sha256(class_file)
+                hash16 = checksum[:16]
+                
+                # A chave agora inclui o modpack para evitar colisões e permitir organização
+                # Formato: modpack:modid:hash16
+                key = f"{modpack_slug}:{mod_id}:{hash16}"
+                entries[key] = checksum
+                count += 1
+                total += 1
 
-        if count > 0:
-            print(f"  {mod_id:20s}  {count:3d} patches")
+            if count > 0:
+                print(f"  {mod_id:20s}  {count:3d} patches")
 
     # Escreve CHECKSUMS.properties
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -99,7 +104,7 @@ def main():
         "# CompatMod patch checksums",
         f"# Gerado em: {now}",
         f"# Total: {total} entradas (incluindo manifest.json)",
-        "# Formato: modid:hash16 = sha256_completo (para patches)",
+        "# Formato: modpack:modid:hash16 = sha256_completo (para patches)",
         "# Formato: manifest:manifest.json = sha256_completo (para metadados)",
         "# IMPORTANTE: Assine este arquivo com Ed25519 antes de publicar:",
         "#   openssl pkeyutl -sign -inkey ed25519.pem -out CHECKSUMS.sig -in CHECKSUMS.properties",
