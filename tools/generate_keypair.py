@@ -85,14 +85,13 @@ def cmd_sign():
         print(f"ERRO: {CHECKSUMS_FILE} não encontrado. Execute generate_checksums.py primeiro.")
         sys.exit(1)
 
-    private_key = load_pem_private_key(PRIVATE_KEY_FILE.read_bytes(), password=None)
+    private_key = load_pem_private_key(PRIVATE_KEY_FILE.read_bytes(), None)
     data        = CHECKSUMS_FILE.read_bytes()
     signature   = private_key.sign(data)
 
     SIG_FILE.write_bytes(signature)
     print(f"✔ Assinatura gerada: {SIG_FILE} ({len(signature)} bytes)")
     print(f"  SHA-256 do manifesto: {__import__('hashlib').sha256(data).hexdigest()[:16]}...")
-
 
 def cmd_verify():
     check_cryptography()

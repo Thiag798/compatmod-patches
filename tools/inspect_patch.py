@@ -3,7 +3,7 @@
 inspect_patch.py — Analisa um arquivo .class de patch para validação técnica.
 
 Uso:
-    python3 tools/inspect_patch.py patches/ic2/75d3acc46040d66d.class
+    python3 tools/inspect_patch.py patches/standalone/ic2/75d3acc46040d66d.class
 """
 
 import sys
