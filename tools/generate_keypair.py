@@ -102,6 +102,12 @@ def cmd_verify():
     if not PUBLIC_KEY_FILE.exists():
         print(f"ERRO: {PUBLIC_KEY_FILE} não encontrado.")
         sys.exit(1)
+    if not CHECKSUMS_FILE.exists():
+        print(f"ERRO: {CHECKSUMS_FILE} não encontrado. Execute generate_checksums.py primeiro.")
+        sys.exit(1)
+    if not SIG_FILE.exists():
+        print(f"ERRO: {SIG_FILE} não encontrado. Execute --sign primeiro.")
+        sys.exit(1)
 
     public_key = load_pem_public_key(PUBLIC_KEY_FILE.read_bytes())
     data       = CHECKSUMS_FILE.read_bytes()

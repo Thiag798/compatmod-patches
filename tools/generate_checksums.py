@@ -49,6 +49,7 @@ def main():
 
     entries = {}
     errors = []
+    collision_errors = []
     total = 0
 
     # Inclui o manifest.json
@@ -91,12 +92,23 @@ def main():
                 # A chave agora inclui o modpack para evitar colisões e permitir organização
                 # Formato: modpack:modid:hash16
                 key = f"{modpack_slug}:{mod_id}:{hash16}"
+                if key in entries and entries[key] != checksum:
+                    collision_errors.append(
+                        f"  ERRO: colisão de hash16 para chave {key} ({class_file.relative_to(PATCHES_DIR)})")
+                    continue
                 entries[key] = checksum
                 count += 1
                 total += 1
 
             if count > 0:
                 print(f"  {mod_id:20s}  {count:3d} patches")
+
+    if collision_errors:
+        print("\nFalhas de integridade:")
+        for e in collision_errors:
+            print(e)
+        print("\nAborted: regenere os patches para eliminar colisões de hash16.")
+        sys.exit(1)
 
     # Escreve CHECKSUMS.properties
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
